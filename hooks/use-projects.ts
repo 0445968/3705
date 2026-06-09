@@ -2,44 +2,104 @@
 
 import { useEffect, useState } from 'react';
 
-import { getProjects, createProject } from '@/lib/queries/projects';
+import {
+  getProjects,
+  createProject,
+  updateProject as updateProjectRequest,
+  type Project,
+  type CreateProjectInput,
+  type UpdateProjectInput,
+} from '@/lib/queries/projects';
 
-import { useCurrentOrg } from '@/store/org-store';
+import { get } from '@/lib/api';
+import { useActiveOrg } from '@/hooks/use-active-org';
+import { useOrgStore } from '@/store/org.store';
+import type { Organization } from '@/types';
 
-import type { Project } from '@/lib/queries/projects';
+type SandboxOrgRow = {
+  id: string;
+  name: string;
+  slug: string;
+  status?: string | null;
+  created_at?: string | null;
+};
 
-export function useProjects() {
-  const currentOrg = useCurrentOrg();
+function mapSandboxOrg(row: SandboxOrgRow): Organization {
+  const createdAt = row.created_at ?? new Date().toISOString();
+
+  return {
+    id: row.id,
+    name: row.name,
+    slug: row.slug,
+    logoUrl: null,
+    plan: 'free',
+  
+    industryKey: 'creative_design',
+    industryLabel: 'Creative & Design',
+    subjectLabelKey: 'client',
+    subjectSingular: 'Client',
+    subjectPlural: 'Clients',
+  
+    createdAt,
+    updatedAt: createdAt,
+  };
+}
+
+export function useProjects(subjectId?: string | null) {
+  const {
+    currentOrg,
+    loading: orgLoading,
+    error: orgError,
+  } = useActiveOrg();
+
+  const setCurrentOrg = useOrgStore((state) => state.setCurrentOrg);
+  const setOrgs = useOrgStore((state) => state.setOrgs);
 
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
 
-  async function loadProjects() {
-    if (!currentOrg?.id) {
-      setProjects([]);
-      setLoading(false);
-      return;
+  async function getResolvedOrg() {
+    if (currentOrg?.id) {
+      return currentOrg;
     }
+
+    if (process.env.NODE_ENV !== 'production') {
+      const sandboxRow = await get<SandboxOrgRow>('/dev/sandbox-org');
+      const sandboxOrg = mapSandboxOrg(sandboxRow);
+
+      setOrgs([sandboxOrg]);
+      setCurrentOrg(sandboxOrg);
+
+      return sandboxOrg;
+    }
+
+    throw new Error('No active organization found.');
+  }
+
+  async function loadProjects() {
+    if (orgLoading) return;
 
     try {
       setLoading(true);
 
-      const data = await getProjects(currentOrg.id);
+      const org = await getResolvedOrg();
+      const data = await getProjects(org.id, subjectId);
 
       setProjects(data);
     } catch (error) {
-      console.error(error);
+      console.error('Failed to load projects:', error);
+      setProjects([]);
     } finally {
       setLoading(false);
     }
   }
 
-  async function addProject(input: Partial<Project>) {
-    if (!currentOrg?.id) return;
+  async function addProject(input: Omit<CreateProjectInput, 'org_id'>) {
+    const org = await getResolvedOrg();
 
     const project = await createProject({
       ...input,
-      org_id: currentOrg.id,
+      org_id: org.id,
     });
 
     setProjects((prev) => [project, ...prev]);
@@ -47,15 +107,35 @@ export function useProjects() {
     return project;
   }
 
+  async function updateProject(id: string, input: Omit<UpdateProjectInput, 'org_id'>) {
+    const org = await getResolvedOrg();
+  
+    const updatedProject = await updateProjectRequest(id, {
+      ...input,
+      org_id: org.id,
+    });
+  
+    setProjects((prev) =>
+      prev.map((project) => (project.id === id ? updatedProject : project))
+    );
+  
+    return updatedProject;
+  }
+
   useEffect(() => {
     loadProjects();
-  }, [currentOrg?.id]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentOrg?.id, orgLoading, subjectId]);
 
   return {
     projects,
-    loading,
-
+    loading: loading || orgLoading,
+    orgLoading,
+    orgError,
+    currentOrg,
+  
     refreshProjects: loadProjects,
     addProject,
+    updateProject,
   };
 }

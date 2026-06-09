@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
@@ -8,39 +8,27 @@ import {
   FileStack,
   Palette,
   Users,
-  Settings,
   ChevronDown,
-  Check,
-  LogOut,
-  Wind,
+  CheckSquare,
   Plus,
-  X,
   Menu,
   Layers,
   Bell,
-  MessageSquare,
   Bot,
   FileText,
-  CheckSquare,
-  FolderPlus,
-  UserPlus,
   Briefcase,
   Search,
-  Pin,
+  Building2,
+  FormInput,
+  MoreHorizontal,
+  Grid2X2,
+  Inbox,
+  Loader2,
 } from 'lucide-react';
-import { cn, getInitials, stringToColor } from '@/lib/utils';
-import { useAuthStore } from '@/store/auth.store';
-import { useOrgStore } from '@/store/org.store';
-import { useLogout } from '@/hooks/use-auth';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
+
+import { cn, getInitials } from '@/lib/utils';
+import { useProjects } from '@/hooks/use-projects';
+import type { Project } from '@/lib/queries/projects';
 
 interface NavItem {
   label: string;
@@ -50,391 +38,607 @@ interface NavItem {
   exact?: boolean;
 }
 
+type SidebarWorkspace = {
+  id: string;
+  name: string;
+  href: string;
+  initial: string;
+  projectCount: number;
+};
+
+type SidebarProject = {
+  id: string;
+  name: string;
+  href: string;
+  workspaceId?: string | null;
+  workspaceName?: string | null;
+  icon?: React.ComponentType<{ className?: string }>;
+  count?: number;
+  createdAt?: string;
+  updatedAt?: string | null;
+};
+
 const NAV_ITEMS: NavItem[] = [
   { label: 'Overview', href: '/dashboard', icon: LayoutDashboard, exact: true },
   { label: 'Requests', href: '/dashboard/requests', icon: FileStack },
   { label: 'Tasks', href: '/dashboard/tasks', icon: CheckSquare },
-  { label: 'Brand Profiles', href: '/dashboard/brands', icon: Palette },
+  { label: 'Profiles', href: '/dashboard/profiles', icon: Palette },
   { label: 'Team', href: '/dashboard/team', icon: Users },
-  { label: 'Workspaces', href: '/dashboard/workspaces', icon: Layers },
-  { label: 'Chat', href: '/dashboard/chat', icon: MessageSquare },
+  { label: 'Subjects', href: '/dashboard/subjects', icon: Building2 },
+  { label: 'Forms', href: '/dashboard/forms', icon: FormInput },
   { label: 'AI Agents', href: '/dashboard/agents', icon: Bot },
   { label: 'Docs', href: '/dashboard/docs', icon: FileText },
 ];
 
-const PINNED_ITEMS = [
-  { id: 'ws_marketing', type: 'Workspace', name: 'Marketing', detail: '4 active requests', href: '/dashboard/workspaces', icon: Layers, color: 'bg-blue-500' },
-  { id: 'ws_product', type: 'Workspace', name: 'Product', detail: '2 launches this week', href: '/dashboard/workspaces', icon: Layers, color: 'bg-emerald-500' },
-  { id: 'pr_bloom', type: 'Project', name: 'Bloom Spring Campaign', detail: 'Client review', href: '/dashboard/requests', icon: Briefcase, color: 'bg-violet-500' },
-  { id: 'pr_acme', type: 'Project', name: 'Acme Brand Refresh', detail: 'Brand version v3', href: '/dashboard/brands', icon: Briefcase, color: 'bg-amber-500' },
-  { id: 'pr_northstar', type: 'Project', name: 'Northstar Retainer', detail: 'Signature needed', href: '/dashboard/docs', icon: Briefcase, color: 'bg-rose-500' },
-];
+function isRouteActive(pathname: string, href: string, exact?: boolean) {
+  return exact
+    ? pathname === href
+    : pathname === href || pathname.startsWith(`${href}/`);
+}
 
-function PinnedGroup({
-  title,
-  items,
-  empty,
-  onClose,
+function getProjectHref(project: Project) {
+  return `/dashboard/projects/${project.id}`;
+}
+
+function getWorkspaceHref(workspaceId: string) {
+  return `/dashboard/workspaces/${workspaceId}`;
+}
+
+function getSoftTileClasses(index: number) {
+  const colors = [
+    'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300',
+    'bg-rose-100 text-rose-700 dark:bg-rose-500/20 dark:text-rose-300',
+    'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300',
+    'bg-orange-100 text-orange-700 dark:bg-orange-500/20 dark:text-orange-300',
+    'bg-indigo-100 text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-300',
+    'bg-sky-100 text-sky-700 dark:bg-sky-500/20 dark:text-sky-300',
+    'bg-violet-100 text-violet-700 dark:bg-violet-500/20 dark:text-violet-300',
+    'bg-cyan-100 text-cyan-700 dark:bg-cyan-500/20 dark:text-cyan-300',
+  ];
+
+  return colors[index % colors.length];
+}
+
+function projectToSidebarProject(project: Project): SidebarProject {
+  return {
+    id: project.id,
+    name: project.name,
+    href: getProjectHref(project),
+    workspaceId: project.workspace_id,
+    workspaceName: project.workspaces?.name ?? null,
+    icon: Briefcase,
+    createdAt: project.created_at,
+    updatedAt: project.updated_at,
+  };
+}
+
+function SidebarSectionHeader({
+  label,
+  actionLabel,
+  actionHref,
+  collapsible = false,
+  collapsed = false,
+  onToggle,
 }: {
-  title: string;
-  items: typeof PINNED_ITEMS;
-  empty: string;
-  onClose?: () => void;
+  label: string;
+  actionLabel?: string;
+  actionHref?: string;
+  collapsible?: boolean;
+  collapsed?: boolean;
+  onToggle?: () => void;
 }) {
   return (
-    <div className="rounded-xl border border-border/60 bg-background/40 p-2">
-      <div className="mb-1.5 flex items-center justify-between px-1">
-        <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/70">
-          {title}
-        </p>
-        <span className="rounded-full bg-muted px-1.5 py-0.5 text-[9px] font-semibold text-muted-foreground">
-          {items.length}
-        </span>
-      </div>
+    <div className="group/header flex items-center justify-between px-5 pb-1 pt-4">
+      <button
+        type="button"
+        onClick={collapsible ? onToggle : undefined}
+        className={cn(
+          'flex min-w-0 items-center gap-1 text-[11px] font-semibold text-muted-foreground/75',
+          collapsible && 'hover:text-foreground'
+        )}
+      >
+        <span className="truncate">{label}</span>
 
-      <div className="space-y-0.5">
-        {items.map((item) => {
-          const Icon = item.icon;
-
-          return (
-            <Link
-              key={item.id}
-              href={item.href}
-              onClick={onClose}
-              className="group flex items-center gap-2 rounded-lg px-2 py-1.5 transition-colors hover:bg-accent"
-            >
-              <div className={cn('flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md text-white', item.color)}>
-                <Icon className="h-3.5 w-3.5" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-[12px] font-medium leading-tight text-foreground group-hover:text-primary">
-                  {item.name}
-                </p>
-                <p className="truncate text-[10.5px] leading-tight text-muted-foreground">
-                  {item.detail}
-                </p>
-              </div>
-            </Link>
-          );
-        })}
-
-        {items.length === 0 ? (
-          <div className="px-2 py-3 text-center text-[11px] text-muted-foreground">
-            {empty}
-          </div>
+        {collapsible ? (
+          <ChevronDown
+            className={cn(
+              'h-3.5 w-3.5 transition-transform',
+              collapsed && '-rotate-90'
+            )}
+          />
         ) : null}
-      </div>
+      </button>
+
+      {actionHref ? (
+        <Link
+          href={actionHref}
+          aria-label={actionLabel}
+          title={actionLabel}
+          className="flex h-5 w-5 items-center justify-center rounded-md text-muted-foreground opacity-0 transition hover:bg-accent hover:text-foreground group-hover/header:opacity-100"
+        >
+          <Plus className="h-3.5 w-3.5" />
+        </Link>
+      ) : null}
+    </div>
+  );
+}
+
+function StaticNavItem({
+  item,
+  pathname,
+  onClose,
+}: {
+  item: NavItem;
+  pathname: string;
+  onClose?: () => void;
+}) {
+  const Icon = item.icon;
+  const isActive = isRouteActive(pathname, item.href, item.exact);
+
+  return (
+    <Link
+      href={item.href}
+      onClick={onClose}
+      className={cn(
+        'group flex items-center gap-2.5 rounded-lg px-2.5 py-[7px] text-[13px] font-medium transition-all duration-150',
+        isActive
+          ? 'bg-primary/[0.12] text-primary'
+          : 'text-muted-foreground hover:bg-white/[0.05] hover:text-foreground'
+      )}
+    >
+      <Icon
+        className={cn(
+          'h-[15px] w-[15px] flex-shrink-0 transition-colors',
+          isActive
+            ? 'text-primary'
+            : 'text-muted-foreground/70 group-hover:text-foreground'
+        )}
+      />
+
+      <span className="min-w-0 flex-1 truncate">{item.label}</span>
+
+      {item.badge ? (
+        <span className="ml-auto flex h-4 min-w-[16px] items-center justify-center rounded-full bg-primary/10 px-1 text-[10px] font-semibold text-primary">
+          {item.badge}
+        </span>
+      ) : null}
+    </Link>
+  );
+}
+
+function WorkspaceRow({
+  workspace,
+  pathname,
+  onClose,
+  index,
+}: {
+  workspace: SidebarWorkspace;
+  pathname: string;
+  onClose?: () => void;
+  index: number;
+}) {
+  const isActive = isRouteActive(pathname, workspace.href);
+
+  return (
+    <div className="group/workspace flex items-center gap-1">
+      <Link
+        href={workspace.href}
+        onClick={onClose}
+        className={cn(
+          'flex min-w-0 flex-1 items-center gap-2.5 rounded-xl px-2.5 py-2 text-[13px] font-medium transition',
+          isActive
+            ? 'bg-sky-100 text-sky-800 dark:bg-sky-500/15 dark:text-sky-300'
+            : 'text-foreground/85 hover:bg-accent/70 hover:text-foreground'
+        )}
+      >
+        <div
+          className={cn(
+            'flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg text-[11px] font-bold',
+            getSoftTileClasses(index)
+          )}
+        >
+          {workspace.initial}
+        </div>
+
+        <span className="min-w-0 flex-1 truncate">{workspace.name}</span>
+
+        {workspace.projectCount > 0 ? (
+          <span
+            className={cn(
+              'text-xs font-semibold',
+              isActive
+                ? 'text-sky-700 dark:text-sky-300'
+                : 'text-muted-foreground'
+            )}
+          >
+            {workspace.projectCount}
+          </span>
+        ) : null}
+      </Link>
+
+      <button
+        type="button"
+        title="Workspace options"
+        className="hidden h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-accent hover:text-foreground group-hover/workspace:flex"
+      >
+        <MoreHorizontal className="h-4 w-4" />
+      </button>
+
+      <Link
+        href={`/dashboard/projects/new?workspace=${workspace.id}`}
+        onClick={onClose}
+        title="New project"
+        className="mr-1 hidden h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-accent hover:text-foreground group-hover/workspace:flex"
+      >
+        <Plus className="h-4 w-4" />
+      </Link>
+    </div>
+  );
+}
+
+function ProjectRow({
+  project,
+  pathname,
+  onClose,
+  index,
+}: {
+  project: SidebarProject;
+  pathname: string;
+  onClose?: () => void;
+  index: number;
+}) {
+  const Icon = project.icon ?? Briefcase;
+  const isActive = isRouteActive(pathname, project.href);
+  const initial = getInitials(project.name).slice(0, 1);
+
+  return (
+    <div className="group/project flex items-center gap-1">
+      <Link
+        href={project.href}
+        onClick={onClose}
+        className={cn(
+          'flex min-w-0 flex-1 items-center gap-2.5 rounded-xl px-2.5 py-1.5 text-[12px] font-medium transition',
+          isActive
+            ? 'bg-sky-100 text-sky-800 dark:bg-sky-500/15 dark:text-sky-300'
+            : 'text-foreground/85 hover:bg-accent/70 hover:text-foreground'
+        )}
+      >
+        <div
+          className={cn(
+            'flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg text-[11px] font-bold',
+            getSoftTileClasses(index + 3)
+          )}
+        >
+          {initial || <Icon className="h-3.5 w-3.5" />}
+        </div>
+
+        <div className="min-w-0 flex-1">
+        <p className="truncate text-[12px] leading-tight">{project.name}</p>
+
+          {project.workspaceName ? (
+            <p className="truncate text-[10px] font-normal leading-tight text-muted-foreground">
+              {project.workspaceName}
+            </p>
+          ) : null}
+        </div>
+
+        {project.count ? (
+          <span
+            className={cn(
+              'text-xs font-semibold',
+              isActive
+                ? 'text-sky-700 dark:text-sky-300'
+                : 'text-muted-foreground'
+            )}
+          >
+            {project.count}
+          </span>
+        ) : null}
+      </Link>
+
+      <button
+        type="button"
+        title="Project options"
+        className="mr-1 hidden h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-accent hover:text-foreground group-hover/project:flex"
+      >
+        <MoreHorizontal className="h-4 w-4" />
+      </button>
+    </div>
+  );
+}
+
+function EmptySectionState({ label }: { label: string }) {
+  return (
+    <div className="mx-3 rounded-lg border border-dashed border-border px-3 py-3 text-center text-[11px] text-muted-foreground">
+      {label}
     </div>
   );
 }
 
 function SidebarContent({ onClose }: { onClose?: () => void }) {
   const pathname = usePathname();
-  const [pinnedQuery, setPinnedQuery] = useState('');
-  const user = useAuthStore((s) => s.user);
-  const currentOrg = useOrgStore((s) => s.currentOrg);
-  const orgs = useOrgStore((s) => s.orgs);
-  const setCurrentOrg = useOrgStore((s) => s.setCurrentOrg);
-  const { mutate: logout } = useLogout();
 
-  const userInitials = user ? getInitials(`${user.firstName} ${user.lastName}`) : 'CK';
-  const orgInitials = currentOrg ? getInitials(currentOrg.name) : 'CK';
-  const orgColor = currentOrg ? stringToColor(currentOrg.id) : '#2563eb';
-  const filteredPinnedItems = PINNED_ITEMS.filter((item) => {
-    const query = pinnedQuery.trim().toLowerCase();
-    if (!query) return true;
-    return (
-      item.name.toLowerCase().includes(query) ||
-      item.type.toLowerCase().includes(query) ||
-      item.detail.toLowerCase().includes(query)
+  const [query, setQuery] = useState('');
+  const [workspacesOpen, setWorkspacesOpen] = useState(true);
+  const [projectsOpen, setProjectsOpen] = useState(true);
+
+  const { projects, loading } = useProjects();
+
+  const sidebarProjects = useMemo<SidebarProject[]>(() => {
+    return projects
+      .slice()
+      .sort((a, b) => {
+        const aDate = a.updated_at ?? a.created_at;
+        const bDate = b.updated_at ?? b.created_at;
+
+        return new Date(bDate).getTime() - new Date(aDate).getTime();
+      })
+      .map(projectToSidebarProject);
+  }, [projects]);
+
+  const workspaceList = useMemo<SidebarWorkspace[]>(() => {
+    const workspaceMap = new Map<
+      string,
+      {
+        id: string;
+        name: string;
+        projectCount: number;
+      }
+    >();
+
+    projects.forEach((project) => {
+      const workspaceId = project.workspace_id;
+      const workspaceName = project.workspaces?.name;
+
+      if (!workspaceId || !workspaceName) return;
+
+      const existing = workspaceMap.get(workspaceId);
+
+      if (existing) {
+        existing.projectCount += 1;
+        return;
+      }
+
+      workspaceMap.set(workspaceId, {
+        id: workspaceId,
+        name: workspaceName,
+        projectCount: 1,
+      });
+    });
+
+    return Array.from(workspaceMap.values())
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map((workspace) => ({
+        id: workspace.id,
+        name: workspace.name,
+        href: getWorkspaceHref(workspace.id),
+        initial: getInitials(workspace.name).slice(0, 1),
+        projectCount: workspace.projectCount,
+      }));
+  }, [projects]);
+
+  const filteredWorkspaces = useMemo(() => {
+    const value = query.trim().toLowerCase();
+
+    if (!value) return workspaceList;
+
+    return workspaceList.filter((workspace) =>
+      workspace.name.toLowerCase().includes(value)
     );
-  });
-  const filteredWorkspaces = filteredPinnedItems.filter((item) => item.type === 'Workspace');
-  const filteredProjects = filteredPinnedItems.filter((item) => item.type === 'Project');
+  }, [query, workspaceList]);
+
+  const filteredProjects = useMemo(() => {
+    const value = query.trim().toLowerCase();
+
+    if (!value) return sidebarProjects;
+
+    return sidebarProjects.filter((project) => {
+      return (
+        project.name.toLowerCase().includes(value) ||
+        project.workspaceName?.toLowerCase().includes(value)
+      );
+    });
+  }, [query, sidebarProjects]);
 
   return (
     <div className="flex h-full flex-col">
-      {/* Header */}
-<div className="flex items-center justify-between px-4 pt-4 pb-3">
-  <div className="flex items-center gap-2.5">
-    <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/15">
-      <Wind className="h-3.5 w-3.5 text-primary" />
-    </div>
-    <span className="text-[13px] font-bold tracking-tight text-foreground">
-      Crafterkite
-    </span>
-  </div>
+      <div className="flex-1 overflow-y-auto py-3">
+        {/* Main menu */}
+        <div className="px-3">
+          <div className="mb-2 px-2">
+            <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/50">
+              Menu
+            </p>
+          </div>
 
-  {/* Create Menu */}
-  <DropdownMenu>
-    <DropdownMenuTrigger asChild>
-      <button className="flex h-7 w-7 items-center justify-center rounded-md border border-border hover:bg-accent transition">
-        <Plus className="h-4 w-4" />
-      </button>
-    </DropdownMenuTrigger>
-
-   <DropdownMenuContent align="end" className="w-52">
-  <DropdownMenuLabel className="text-xs text-muted-foreground">
-    Create new
-  </DropdownMenuLabel>
-
-  <DropdownMenuSeparator />
-
-  <DropdownMenuItem asChild>
-    <Link href="/dashboard/projects/new" className="flex items-center gap-2">
-      <FolderPlus className="h-3.5 w-3.5" />
-      New project
-    </Link>
-  </DropdownMenuItem>
-
-  <DropdownMenuItem asChild>
-    <Link href="/dashboard/tasks/new" className="flex items-center gap-2">
-      <CheckSquare className="h-3.5 w-3.5" />
-      New task
-    </Link>
-  </DropdownMenuItem>
-
-  <DropdownMenuItem asChild>
-    <Link href="/dashboard/workspaces/new" className="flex items-center gap-2">
-      <Briefcase className="h-3.5 w-3.5" />
-      New workspace
-    </Link>
-  </DropdownMenuItem>
-
-  <DropdownMenuItem asChild>
-    <Link
-     href="/dashboard/organizations/create-org"
-      className="flex items-center gap-2 font-medium text-primary"
-    >
-      <Plus className="h-3.5 w-3.5" />
-      New organization
-    </Link>
-  </DropdownMenuItem>
-
-  <DropdownMenuItem asChild>
-    <Link href="/dashboard/contacts/new" className="flex items-center gap-2">
-      <UserPlus className="h-3.5 w-3.5" />
-      New contact
-    </Link>
-  </DropdownMenuItem>
-
-  <DropdownMenuItem asChild>
-    <Link href="/dashboard/brands/new" className="flex items-center gap-2">
-      <Palette className="h-3.5 w-3.5" />
-      New brand profile
-    </Link>
-  </DropdownMenuItem>
-</DropdownMenuContent>
-  </DropdownMenu>
-
-  {onClose && (
-    <button
-      onClick={onClose}
-      className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-white/5 hover:text-foreground lg:hidden"
-    >
-      <X className="h-4 w-4" />
-    </button>
-  )}
-</div>
-
-      {/* Org Selector */}
-      <div className="px-3 pb-3">
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-all hover:bg-white/[0.06] focus:outline-none group border border-white/[0.04] hover:border-white/[0.08]">
-              <div
-                className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md text-[10px] font-bold text-white shadow-sm"
-                style={{ backgroundColor: orgColor }}
-              >
-                {orgInitials}
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="truncate text-[12.5px] font-semibold text-foreground leading-tight">
-                  {currentOrg?.name ?? 'Select workspace'}
-                </p>
-                <p className="text-[10.5px] text-muted-foreground leading-tight mt-0.5">
-                  Organization
-                </p>
-              </div>
-              <ChevronDown className="h-3.5 w-3.5 text-muted-foreground transition-transform duration-200 group-data-[state=open]:rotate-180 flex-shrink-0" />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" side="bottom" className="w-[220px]" sideOffset={4}>
-            <DropdownMenuLabel className="text-[10px] uppercase tracking-widest text-muted-foreground">
-              Organizations
-            </DropdownMenuLabel>
-            {orgs.map((org) => (
-              <DropdownMenuItem
-                key={org.id}
-                onClick={() => setCurrentOrg(org)}
-                className="flex items-center gap-2.5 cursor-pointer"
-              >
-                <div
-                  className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded text-[9px] font-bold text-white"
-                  style={{ backgroundColor: stringToColor(org.id) }}
-                >
-                  {getInitials(org.name)}
-                </div>
-                <span className="flex-1 truncate text-sm">{org.name}</span>
-                {currentOrg?.id === org.id && <Check className="h-3.5 w-3.5 text-primary" />}
-              </DropdownMenuItem>
+          <nav className="space-y-0.5">
+            {NAV_ITEMS.map((item) => (
+              <StaticNavItem
+                key={item.href}
+                item={item}
+                pathname={pathname}
+                onClose={onClose}
+              />
             ))}
-            {orgs.length === 0 && (
-              <DropdownMenuItem disabled className="text-muted-foreground text-sm">
-                No organizations
-              </DropdownMenuItem>
-            )}
-            <DropdownMenuSeparator />
-            <DropdownMenuItem asChild>
-              <Link href="/onboarding/create-org" onClick={onClose} className="flex items-center gap-2 cursor-pointer">
-                <Plus className="h-3.5 w-3.5" />
-                <span>New organization</span>
-              </Link>
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
-
-      <div className="flex-1 overflow-y-auto">
-        {/* Nav label */}
-        <div className="px-5 pb-2">
-          <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/50">
-            Menu
-          </p>
+          </nav>
         </div>
 
-        {/* Navigation */}
-        <nav className="px-3 py-1">
-          <div className="space-y-0.5">
-            {NAV_ITEMS.map((item) => {
-              const Icon = item.icon;
-              const isActive = item.exact
-                ? pathname === item.href
-                : pathname === item.href || pathname.startsWith(item.href + '/');
+        {/* Search */}
+        <div className="px-3 pt-4">
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/70" />
 
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  onClick={onClose}
-                  className={cn(
-                    'group flex items-center gap-2.5 rounded-lg px-2.5 py-[7px] text-[13px] font-medium transition-all duration-150',
-                    isActive
-                      ? 'bg-primary/[0.12] text-primary'
-                      : 'text-muted-foreground hover:bg-white/[0.05] hover:text-foreground'
-                  )}
-                >
-                  <Icon
-                    className={cn(
-                      'h-[15px] w-[15px] flex-shrink-0 transition-colors',
-                      isActive ? 'text-primary' : 'text-muted-foreground/70 group-hover:text-foreground'
-                    )}
-                  />
-                  <span className="flex-1">{item.label}</span>
-                </Link>
-              );
-            })}
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search workspaces or projects..."
+              className="h-8 w-full rounded-lg border border-border bg-card pl-8 pr-2 text-xs text-foreground outline-none transition-shadow placeholder:text-muted-foreground/60 focus:ring-2 focus:ring-primary/20"
+            />
           </div>
-        </nav>
+        </div>
 
-        {/* Pinned projects and workspaces */}
-        <div className="px-3 pb-3 pt-3">
-          <div className="mb-2 flex items-center justify-between px-1">
-            <div className="flex items-center gap-1.5">
-              <Pin className="h-3 w-3 text-primary" />
-              <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/70">
-                Pinned
-              </p>
-            </div>
+        {/* Workspaces */}
+        <SidebarSectionHeader
+          label="Workspaces"
+          actionLabel="Create workspace"
+          actionHref="/dashboard/workspaces/new"
+          collapsible
+          collapsed={!workspacesOpen}
+          onToggle={() => setWorkspacesOpen((value) => !value)}
+        />
+
+        {workspacesOpen ? (
+          <div className="space-y-1 px-3">
             <Link
               href="/dashboard/workspaces"
               onClick={onClose}
-              className="text-[10px] font-medium text-primary hover:text-primary/80"
+              className={cn(
+                'flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-[13px] font-medium transition',
+                pathname === '/dashboard/workspaces'
+                  ? 'bg-sky-100 text-sky-800 dark:bg-sky-500/15 dark:text-sky-300'
+                  : 'text-foreground/85 hover:bg-accent/70 hover:text-foreground'
+              )}
             >
-              Manage
+              <Grid2X2 className="h-4 w-4" />
+              <span className="flex-1">Everything</span>
+
+              {workspaceList.length > 0 ? (
+                <span className="text-xs font-semibold text-muted-foreground">
+                  {workspaceList.length}
+                </span>
+              ) : null}
+            </Link>
+
+            {loading ? (
+              <div className="flex items-center gap-2 px-2.5 py-2 text-xs text-muted-foreground">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                Loading workspaces...
+              </div>
+            ) : filteredWorkspaces.length > 0 ? (
+              filteredWorkspaces.map((workspace, index) => (
+                <WorkspaceRow
+                  key={workspace.id}
+                  workspace={workspace}
+                  pathname={pathname}
+                  onClose={onClose}
+                  index={index}
+                />
+              ))
+            ) : (
+              <EmptySectionState label="No workspaces found." />
+            )}
+
+            <Link
+              href="/dashboard/workspaces"
+              onClick={onClose}
+              className="flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-[13px] font-medium text-foreground/85 transition hover:bg-accent/70 hover:text-foreground"
+            >
+              <Grid2X2 className="h-4 w-4 text-muted-foreground" />
+              View all Workspaces
+            </Link>
+
+            <Link
+              href="/dashboard/workspaces/new"
+              onClick={onClose}
+              className="flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-[13px] font-medium text-foreground/85 transition hover:bg-accent/70 hover:text-foreground"
+            >
+              <Plus className="h-4 w-4 text-muted-foreground" />
+              Create Workspace
             </Link>
           </div>
+        ) : null}
 
-          <div className="relative mb-2">
-            <Search className="absolute left-2.5 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground/70" />
-            <input
-              value={pinnedQuery}
-              onChange={(event) => setPinnedQuery(event.target.value)}
-              placeholder="Search workspaces or projects..."
-              className="h-7 w-full rounded-md border border-border bg-card pl-7 pr-2 text-[11px] text-foreground placeholder:text-muted-foreground/60 outline-none transition-shadow focus:ring-2 focus:ring-primary/20"
-            />
-          </div>
+        {/* Projects */}
+        <SidebarSectionHeader
+          label="Projects"
+          actionLabel="Create project"
+          actionHref="/dashboard/projects/new"
+          collapsible
+          collapsed={!projectsOpen}
+          onToggle={() => setProjectsOpen((value) => !value)}
+        />
 
-          <div className="space-y-2">
-            <PinnedGroup
-              title="Workspaces"
-              items={filteredWorkspaces}
-              empty="No workspaces found."
-              onClose={onClose}
-            />
-            <PinnedGroup
-              title="Projects"
-              items={filteredProjects}
-              empty="No projects found."
-              onClose={onClose}
-            />
+        {projectsOpen ? (
+          <div className="space-y-1 px-3">
+            <Link
+              href="/dashboard/projects"
+              onClick={onClose}
+              className={cn(
+                'flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-[13px] font-medium transition',
+                pathname === '/dashboard/projects'
+                  ? 'bg-sky-100 text-sky-800 dark:bg-sky-500/15 dark:text-sky-300'
+                  : 'text-foreground/85 hover:bg-accent/70 hover:text-foreground'
+              )}
+            >
+              <Briefcase className="h-4 w-4" />
+              <span className="flex-1">All Projects</span>
+
+              {sidebarProjects.length > 0 ? (
+                <span className="text-xs font-semibold text-muted-foreground">
+                  {sidebarProjects.length}
+                </span>
+              ) : null}
+            </Link>
+
+            {loading ? (
+              <div className="flex items-center gap-2 px-2.5 py-2 text-xs text-muted-foreground">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                Loading projects...
+              </div>
+            ) : filteredProjects.length > 0 ? (
+              filteredProjects.map((project, index) => (
+                <ProjectRow
+                  key={project.id}
+                  project={project}
+                  pathname={pathname}
+                  onClose={onClose}
+                  index={index}
+                />
+              ))
+            ) : (
+              <EmptySectionState label="No projects found." />
+            )}
+
+            <Link
+              href="/dashboard/projects"
+              onClick={onClose}
+              className="flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-[13px] font-medium text-foreground/85 transition hover:bg-accent/70 hover:text-foreground"
+            >
+              <Briefcase className="h-4 w-4 text-muted-foreground" />
+              View all Projects
+            </Link>
+
+            <Link
+              href="/dashboard/projects/new"
+              onClick={onClose}
+              className="flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-[13px] font-medium text-foreground/85 transition hover:bg-accent/70 hover:text-foreground"
+            >
+              <Plus className="h-4 w-4 text-muted-foreground" />
+              Create Project
+            </Link>
           </div>
-        </div>
+        ) : null}
       </div>
 
-      {/* Notifications */}
-      <div className="px-3 pb-2">
-        <button className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-[7px] text-[13px] font-medium text-muted-foreground transition-all hover:bg-white/[0.05] hover:text-foreground">
-          <Bell className="h-[15px] w-[15px]" />
+      {/* Bottom utility */}
+      <div className="border-t border-border/60 px-3 py-2">
+        <Link
+          href="/dashboard/team/invite"
+          onClick={onClose}
+          className="flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-[13px] font-medium text-foreground/85 transition hover:bg-accent/70 hover:text-foreground"
+        >
+          <Users className="h-4 w-4 text-muted-foreground" />
+          <span className="flex-1">Invite</span>
+          <Inbox className="h-4 w-4 text-muted-foreground/60" />
+        </Link>
+
+        <button className="mt-1 flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-[13px] font-medium text-foreground/85 transition-all hover:bg-accent/70 hover:text-foreground">
+          <Bell className="h-4 w-4 text-muted-foreground" />
           <span>Notifications</span>
           <span className="ml-auto flex h-4 min-w-[16px] items-center justify-center rounded-full bg-blue-500/20 px-1 text-[10px] font-semibold text-blue-400">
             3
           </span>
         </button>
-      </div>
-
-      {/* User profile */}
-      <div className="border-t border-border/50 px-3 py-3">
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 transition-all hover:bg-white/[0.05] focus:outline-none group">
-              <Avatar className="h-7 w-7 flex-shrink-0">
-                {user?.avatarUrl && <AvatarImage src={user.avatarUrl} alt={user.firstName} />}
-                <AvatarFallback
-                  className="text-[10px] font-bold text-white"
-                  style={{ backgroundColor: user ? stringToColor(user.id) : '#2563eb' }}
-                >
-                  {userInitials}
-                </AvatarFallback>
-              </Avatar>
-              <div className="flex-1 min-w-0 text-left">
-                <p className="truncate text-[12.5px] font-semibold text-foreground leading-tight">
-                  {user ? `${user.firstName} ${user.lastName}` : 'Loading...'}
-                </p>
-                <p className="truncate text-[11px] text-muted-foreground mt-0.5 leading-tight">
-                  {user?.email ?? ''}
-                </p>
-              </div>
-              <ChevronDown className="h-3 w-3 text-muted-foreground flex-shrink-0 transition-transform duration-200 group-data-[state=open]:rotate-180" />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" side="top" className="w-[200px] mb-1">
-            <DropdownMenuItem asChild>
-              <Link href="/settings" className="cursor-pointer">
-                <Settings className="mr-2 h-3.5 w-3.5" />
-                Settings
-              </Link>
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              onClick={() => logout()}
-              className="text-destructive focus:text-destructive cursor-pointer"
-            >
-              <LogOut className="mr-2 h-3.5 w-3.5" />
-              Sign out
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
       </div>
     </div>
   );
@@ -452,7 +656,9 @@ export function DashboardSidebar() {
     const handleResize = () => {
       if (window.innerWidth >= 1024) setMobileOpen(false);
     };
+
     window.addEventListener('resize', handleResize);
+
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
@@ -468,12 +674,12 @@ export function DashboardSidebar() {
       </button>
 
       {/* Mobile overlay */}
-      {mobileOpen && (
+      {mobileOpen ? (
         <div
           className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm lg:hidden"
           onClick={() => setMobileOpen(false)}
         />
-      )}
+      ) : null}
 
       {/* Mobile drawer */}
       <aside
@@ -485,10 +691,10 @@ export function DashboardSidebar() {
         <SidebarContent onClose={() => setMobileOpen(false)} />
       </aside>
 
-       {/* Desktop sidebar */}
-    <aside className="hidden w-[280px] flex-col border-r border-border/60 bg-[hsl(var(--sidebar))] lg:flex shrink-0">
-      <SidebarContent />
-    </aside>
+      {/* Desktop sidebar */}
+      <aside className="hidden w-[280px] shrink-0 flex-col border-r border-border/60 bg-[hsl(var(--sidebar))] lg:flex">
+        <SidebarContent />
+      </aside>
     </>
   );
 }

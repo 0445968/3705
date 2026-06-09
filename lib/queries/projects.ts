@@ -1,65 +1,97 @@
-import { supabase } from '@/lib/supabase/client';
+import { get, patch, post } from '@/lib/api';
+
+export type ProjectStatus =
+  | 'active'
+  | 'draft'
+  | 'paused'
+  | 'completed'
+  | 'archived';
 
 export type Project = {
   id: string;
   org_id: string;
+
+  subject_id?: string | null;
+  company_id?: string | null;
+  workspace_id?: string | null;
+
   name: string;
   description?: string | null;
-  status: 'active' | 'archived';
+
+  industry?: string | null;
+  sector?: string | null;
+
+  status: ProjectStatus | string | null;
+  due_date?: string | null;
+
+  created_by?: string | null;
   created_at: string;
-  updated_at: string;
+  updated_at?: string | null;
+
+  subject?: {
+    id: string;
+    name: string;
+    slug?: string | null;
+    industry?: string | null;
+    sector?: string | null;
+  } | null;
+
+  workspaces?: {
+    id: string;
+    name: string;
+  } | null;
 };
 
-export async function getProjects(orgId: string) {
-  const { data, error } = await supabase
-    .from('projects')
-    .select('*')
-    .eq('org_id', orgId)
-    .order('created_at', { ascending: false });
+export type CreateProjectInput = {
+  org_id: string;
 
-  if (error) throw error;
-  return data as Project[];
+  subject_id?: string | null;
+  company_id?: string | null;
+  workspace_id?: string | null;
+
+  name: string;
+  description?: string | null;
+
+  industry?: string | null;
+  sector?: string | null;
+
+  status?: ProjectStatus | string;
+  due_date?: string | null;
+};
+
+export type UpdateProjectInput = {
+  org_id: string;
+
+  subject_id?: string | null;
+  company_id?: string | null;
+  workspace_id?: string | null;
+
+  name?: string;
+  description?: string | null;
+
+  industry?: string | null;
+  sector?: string | null;
+
+  status?: ProjectStatus | string;
+  due_date?: string | null;
+};
+
+export async function getProjects(orgId: string, subjectId?: string | null) {
+  const params = new URLSearchParams({
+    orgId,
+  });
+
+  if (subjectId) {
+    params.set('subjectId', subjectId);
+  }
+
+  return get<Project[]>(`/projects?${params.toString()}`);
 }
 
-export async function getProject(id: string) {
-  const { data, error } = await supabase
-    .from('projects')
-    .select('*')
-    .eq('id', id)
-    .single();
-
-  if (error) throw error;
-  return data as Project;
+export async function createProject(input: CreateProjectInput) {
+  return post<Project, CreateProjectInput>('/projects', input);
 }
 
-export async function createProject(input: Partial<Project>) {
-  const { data, error } = await supabase
-    .from('projects')
-    .insert(input)
-    .select()
-    .single();
-
-  if (error) throw error;
-  return data as Project;
-}
-
-export async function updateProject(id: string, updates: Partial<Project>) {
-  const { data, error } = await supabase
-    .from('projects')
-    .update({
-      ...updates,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', id)
-    .select()
-    .single();
-
-  if (error) throw error;
-  return data as Project;
-}
-
-export async function deleteProject(id: string) {
-  const { error } = await supabase.from('projects').delete().eq('id', id);
-  if (error) throw error;
-  return true;
+export async function updateProject(id: string, input: UpdateProjectInput) {
+  return patch<Project, UpdateProjectInput>(`/projects/${id}`, input);
 }

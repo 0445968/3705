@@ -1,67 +1,124 @@
-import { supabase } from '@/lib/supabase/client';
+import { del, get, patch, post } from '@/lib/api';
+
+export type TaskStatus =
+  | 'backlog'
+  | 'todo'
+  | 'in_progress'
+  | 'review'
+  | 'done';
+
+export type TaskPriority = 'low' | 'medium' | 'high';
 
 export type Task = {
   id: string;
+  org_id: string;
+
   project_id: string;
+  subject_id?: string | null;
+
   title: string;
   description?: string | null;
-  status: 'todo' | 'in_progress' | 'done';
-  priority: 'low' | 'medium' | 'high';
+
+  status: TaskStatus | string;
+  priority: TaskPriority | string;
+
+  assigned_to?: string | null;
+  position?: number | null;
+
   due_date?: string | null;
+
+  created_by?: string | null;
   created_at: string;
-  updated_at: string;
+  updated_at?: string | null;
+
+  project?: {
+    id: string;
+    name: string;
+    subject_id?: string | null;
+  } | null;
+
+  subject?: {
+    id: string;
+    name: string;
+    slug?: string | null;
+  } | null;
 };
 
-export async function getTasks(projectId: string) {
-  const { data, error } = await supabase
-    .from('tasks')
-    .select('*')
-    .eq('project_id', projectId)
-    .order('created_at', { ascending: false });
+export type GetTasksFilters = {
+  projectId?: string | null;
+  subjectId?: string | null;
+  status?: TaskStatus | string | null;
+};
 
-  if (error) throw error;
-  return data as Task[];
+export type CreateTaskInput = {
+  org_id: string;
+
+  project_id: string;
+  subject_id?: string | null;
+
+  title: string;
+  description?: string | null;
+
+  status?: TaskStatus | string;
+  priority?: TaskPriority | string;
+
+  assigned_to?: string | null;
+  position?: number | null;
+
+  due_date?: string | null;
+  created_by?: string | null;
+};
+
+export type UpdateTaskInput = {
+  org_id: string;
+
+  title?: string;
+  description?: string | null;
+
+  status?: TaskStatus | string;
+  priority?: TaskPriority | string;
+
+  assigned_to?: string | null;
+  position?: number | null;
+
+  due_date?: string | null;
+};
+
+export async function getTasks(
+  orgId: string,
+  filters: GetTasksFilters = {}
+) {
+  const params = new URLSearchParams({
+    orgId,
+  });
+
+  if (filters.projectId) {
+    params.set('projectId', filters.projectId);
+  }
+
+  if (filters.subjectId) {
+    params.set('subjectId', filters.subjectId);
+  }
+
+  if (filters.status) {
+    params.set('status', filters.status);
+  }
+
+  return get<Task[]>(`/tasks?${params.toString()}`);
 }
 
-export async function getTask(id: string) {
-  const { data, error } = await supabase
-    .from('tasks')
-    .select('*')
-    .eq('id', id)
-    .single();
-
-  if (error) throw error;
-  return data as Task;
+export async function createTask(input: CreateTaskInput) {
+  return post<Task, CreateTaskInput>('/tasks', input);
 }
 
-export async function createTask(input: Partial<Task>) {
-  const { data, error } = await supabase
-    .from('tasks')
-    .insert(input)
-    .select()
-    .single();
-
-  if (error) throw error;
-  return data as Task;
+export async function updateTask(id: string, input: UpdateTaskInput) {
+  return patch<Task, UpdateTaskInput>(`/tasks/${id}`, input);
 }
 
-export async function updateTask(id: string, updates: Partial<Task>) {
-  const { data, error } = await supabase
-    .from('tasks')
-    .update({
-      ...updates,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', id)
-    .select()
-    .single();
+export async function deleteTask(id: string, orgId: string) {
+  const params = new URLSearchParams({
+    orgId,
+  });
 
-  if (error) throw error;
-  return data as Task;
-}
-
-export async function deleteTask(id: string) {
-  const { error } = await supabase.from('tasks').delete().eq('id', id);
-  if (error) throw error;
-  return true;
+  return del<{ success: true }>(`/tasks/${id}?${params.toString()}`);
 }
